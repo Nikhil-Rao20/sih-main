@@ -1,0 +1,27 @@
+{
+  "name": "sih-portal-server",
+  "version": "1.0.0",
+  "description": "SIH Portal Backend API with Security",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index-simple.js",
+    "dev": "node --watch index-simple.js",
+    "setup": "node setup.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^5.0.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "cors": "^2.8.5",
+    "zod": "^3.22.4"
+  },
+  "keywords": ["sih", "hackathon", "api", "security"],
+  "author": "SIH Team",
+  "license": "MIT"
+}
