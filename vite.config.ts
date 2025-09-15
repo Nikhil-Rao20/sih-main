@@ -8,8 +8,27 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   server: {
+    host: '0.0.0.0',
+    port: 5177,
     proxy: {
-      '/api': 'http://localhost:4000'
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false
+      }
+    }
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 4173
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined
+      }
     }
   }
 });

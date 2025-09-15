@@ -1,9 +1,6 @@
-// API Base URL - will be updated after backend deployment
-const API_BASE_URL = import.meta.env.PROD 
-  ? 'https://your-backend-url.railway.app/api'  // ← Update this after backend deployment
-  : 'http://localhost:4000/api';
-
-export const apiBase = API_BASE_URL;
+// Dynamic API base URL configuration for different environments
+export const apiBase = import.meta.env.VITE_API_BASE || 
+  (import.meta.env.MODE === 'development' ? 'http://localhost:4000/api' : '/api');
 
 export async function apiGet(path: string) {
   const res = await fetch(`${apiBase}${path}`, {
