@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import cors from 'cors'
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -13,7 +14,10 @@ const PORT = process.env.PORT || 10000;
 const BACKEND_URL = process.env.BACKEND_URL || 'https://sih-backend.onrender.com';
 
 console.log(`� Backend URL: ${BACKEND_URL}`);
+app.use(cors())
 
+// Middleware to parse JSON requests
+app.use(express.json());
 // API proxy to backend service
 app.use('/api', createProxyMiddleware({
   target: BACKEND_URL,
