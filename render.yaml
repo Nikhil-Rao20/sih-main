@@ -4,13 +4,19 @@ services:
     name: sih-backend
     env: node
     plan: free
+    region: oregon
+    runtime: node22
     buildCommand: cd server && npm install
-    startCommand: cd server && node index-simple.js
+    startCommand: cd server && node index-mongodb.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
+      - key: MONGODB_URI
+        value: mongodb+srv://your-username:your-password@cluster.mongodb.net/
+      - key: MONGODB_DB
+        value: sih_portal
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL
@@ -23,6 +29,8 @@ services:
     name: sih-frontend
     env: node
     plan: free
+    region: oregon
+    runtime: node22
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
@@ -35,4 +43,4 @@ services:
       - key: BACKEND_URL
         value: https://sih-backend.onrender.com
 
-# SQLite will be used instead of PostgreSQL for simplicity
+# MongoDB Atlas will be used as the database service

@@ -30,6 +30,11 @@ out/
 *.db
 server/data.sqlite*
 
+# MongoDB dumps and logs
+*.bson
+dump/
+mongodump/
+
 # Logs
 logs/
 *.log
