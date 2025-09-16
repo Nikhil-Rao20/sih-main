@@ -6,6 +6,8 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createClient } from "@libsql/client";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,50 +35,43 @@ let db;
 
 async function initDb() {
   try {
-    // Use relative path for SQLite in production
-    const dbPath = process.env.NODE_ENV === 'production' 
-      ? './data.sqlite' 
-      : path.join(__dirname, 'data.sqlite');
-    
-    db = await open({
-      filename: dbPath,
-      driver: sqlite3.Database
+    db = createClient({
+      url: "libsql://sih-nikhil-rao20.aws-ap-south-1.turso.io",
+      authToken: "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NTc5OTYxOTMsImlkIjoiY2QyZWU2M2ItMjYwMS00NjY2LTk5ZjAtZmEwNjJlNzMxYzhjIiwicmlkIjoiYjU1NGE4MzUtZjg3Yi00MDEyLTk2MmItNTIxZGU1YWMxY2IyIn0.ImZEzi3NuRfRAqk79nG3GDSt7M8ITVBPzJ-0UGizQP4TC0qwE1ESlD2hFkO7ig03_yfUGYondE-RVy-2Z0VnAw",
     });
 
-    console.log('📊 Database connection established');
+    console.log("📊 Database connection established");
 
-    await db.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA busy_timeout = 5000;
-      
-      CREATE TABLE IF NOT EXISTS teams (
+    // All schema + pragma statements split into array
+    const statements = [
+      `PRAGMA foreign_keys = ON;`,
+
+      `CREATE TABLE IF NOT EXISTS teams (
         team_id TEXT PRIMARY KEY,
         team_name TEXT NOT NULL,
         leader_name TEXT NOT NULL,
         leader_id TEXT NOT NULL,
         phone TEXT NOT NULL
-      );
+      );`,
 
-      CREATE TABLE IF NOT EXISTS juries (
+      `CREATE TABLE IF NOT EXISTS juries (
         jury_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT,
         department TEXT NOT NULL,
         password_hash TEXT
-      );
+      );`,
 
-      CREATE TABLE IF NOT EXISTS jury_assignments (
+      `CREATE TABLE IF NOT EXISTS jury_assignments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         team_id TEXT NOT NULL,
         jury_id TEXT NOT NULL,
         UNIQUE(team_id, jury_id),
         FOREIGN KEY(team_id) REFERENCES teams(team_id) ON DELETE CASCADE,
         FOREIGN KEY(jury_id) REFERENCES juries(jury_id) ON DELETE CASCADE
-      );
+      );`,
 
-      CREATE TABLE IF NOT EXISTS submissions (
+      `CREATE TABLE IF NOT EXISTS submissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         team_id TEXT NOT NULL,
         problem_id INTEGER NOT NULL,
@@ -85,9 +80,9 @@ async function initDb() {
         created_at TEXT NOT NULL,
         presented INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY(team_id) REFERENCES teams(team_id)
-      );
+      );`,
 
-      CREATE TABLE IF NOT EXISTS evaluations (
+      `CREATE TABLE IF NOT EXISTS evaluations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         team_id TEXT NOT NULL,
         jury_id TEXT NOT NULL,
@@ -99,56 +94,35 @@ async function initDb() {
         total_score REAL NOT NULL,
         created_at TEXT NOT NULL,
         UNIQUE(team_id, jury_id)
-      );
+      );`,
 
-      CREATE INDEX IF NOT EXISTS idx_juries_email ON juries(email);
-      CREATE INDEX IF NOT EXISTS idx_assignments_team ON jury_assignments(team_id);
-      CREATE INDEX IF NOT EXISTS idx_assignments_jury ON jury_assignments(jury_id);
-      CREATE INDEX IF NOT EXISTS idx_eval_team ON evaluations(team_id);
-      CREATE INDEX IF NOT EXISTS idx_eval_team_jury ON evaluations(team_id, jury_id);
-      CREATE INDEX IF NOT EXISTS idx_submissions_team ON submissions(team_id);
-      CREATE INDEX IF NOT EXISTS idx_submissions_created ON submissions(created_at);
-    `);
+      `CREATE INDEX IF NOT EXISTS idx_juries_email ON juries(email);`,
+      `CREATE INDEX IF NOT EXISTS idx_assignments_team ON jury_assignments(team_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_assignments_jury ON jury_assignments(jury_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_eval_team ON evaluations(team_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_eval_team_jury ON evaluations(team_id, jury_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_submissions_team ON submissions(team_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_submissions_created ON submissions(created_at);`,
+    ];
 
-    // Backfill columns if needed
-    try {
-      const columns = await db.all(`PRAGMA table_info(submissions)`);
-      const hasPresented = columns.some(c => c.name === 'presented');
-      const hasProblemCode = columns.some(c => c.name === 'problem_code');
-      if (!hasPresented) {
-        await db.exec(`ALTER TABLE submissions ADD COLUMN presented INTEGER NOT NULL DEFAULT 0`);
-      }
-      if (!hasProblemCode) {
-        await db.exec(`ALTER TABLE submissions ADD COLUMN problem_code TEXT NOT NULL DEFAULT ''`);
-      }
-    } catch (e) {
-      console.log('Column backfill skipped:', e.message);
+    // Run statements one by one
+    for (const stmt of statements) {
+      await db.execute(stmt);
     }
 
-    // Backfill juries.password_hash if missing
-    try {
-      const columnsJ = await db.all(`PRAGMA table_info(juries)`);
-      const hasPwd = columnsJ.some(c => c.name === 'password_hash');
-      if (!hasPwd) {
-        await db.exec(`ALTER TABLE juries ADD COLUMN password_hash TEXT`);
-      }
-    } catch (e) {
-      console.log('Jury password column backfill skipped:', e.message);
-    }
-
-    // Seed data
+    // ✅ Seeding
     await seedInitialData();
-    
-    console.log('✅ Database initialized successfully');
+
+    console.log("✅ Database initialized successfully");
   } catch (error) {
-    console.error('❌ Database initialization failed:', error);
+    console.error("❌ Database initialization failed:", error);
     throw error;
   }
 }
 
 async function seedInitialData() {
   // Seed dummy juries if none exist
-  const juryCount = await db.get(`SELECT COUNT(*) as c FROM juries`);
+  const juryCount = await db.execute(`SELECT COUNT(*) as c FROM juries`);
   if (!juryCount || juryCount.c === 0) {
     const seed = [
       // Department juries
@@ -168,16 +142,16 @@ async function seedInitialData() {
       ['jury4','Demo Jury 4', 'jury4@sih2025.com', 'Mechanical']
     ];
     
-    const insertStmt = await db.prepare(`INSERT INTO juries (jury_id, name, email, department) VALUES (?, ?, ?, ?)`);
+    const insertStmt = await db.execute(`INSERT INTO juries (jury_id, name, email, department) VALUES (?, ?, ?, ?)`);
     try {
-      await db.exec('BEGIN');
+      await db.execute('BEGIN');
       for (const row of seed) {
         await insertStmt.run(row);
       }
-      await db.exec('COMMIT');
+      await db.execute('COMMIT');
       console.log('🌱 Seeded initial jury data');
     } catch (e) {
-      await db.exec('ROLLBACK');
+      await db.execute('ROLLBACK');
       console.error('Failed to seed jury data:', e);
     } finally {
       await insertStmt.finalize();
@@ -194,10 +168,10 @@ async function seedInitialData() {
     ];
     
     for (const { email, pass } of demoPwds) {
-      const row = await db.get(`SELECT jury_id, password_hash FROM juries WHERE email = ?`, [email]);
+      const row = await db.execute(`SELECT jury_id, password_hash FROM juries WHERE email = ?`, [email]);
       if (row && (!row.password_hash || String(row.password_hash).trim() === '')) {
         const hashed = hashPassword(pass);
-        await db.run(`UPDATE juries SET password_hash = ? WHERE email = ?`, [hashed, email]);
+        await db.execute(`UPDATE juries SET password_hash = ? WHERE email = ?`, [hashed, email]);
       }
     }
     console.log('🔑 Demo jury passwords set');
@@ -283,7 +257,7 @@ app.post('/api/submit', async (req, res) => {
     const parsed = submissionSchema.parse(req.body);
 
     // Upsert team
-    await db.run(
+    await db.execute(
       `INSERT INTO teams (team_id, team_name, leader_name, leader_id, phone)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(team_id) DO UPDATE SET 
@@ -295,7 +269,7 @@ app.post('/api/submit', async (req, res) => {
     );
 
     // Check submission limit (max 2 per team)
-    const row = await db.get(`SELECT COUNT(*) as count FROM submissions WHERE team_id = ?`, [parsed.team_id]);
+    const row = await db.execute(`SELECT COUNT(*) as count FROM submissions WHERE team_id = ?`, [parsed.team_id]);
     if (row.count >= 2) {
       return res.status(400).json({ 
         error: 'Submission limit reached. Only 2 problem statements allowed per team.' 
@@ -303,28 +277,28 @@ app.post('/api/submit', async (req, res) => {
     }
 
     const numericId = Number(parsed.problem_code.slice(3));
-    await db.run(
+    await db.execute(
       `INSERT INTO submissions (team_id, problem_id, problem_code, slides_link, created_at)
        VALUES (?, ?, ?, ?, datetime('now'))`,
       [parsed.team_id, isFinite(numericId) ? numericId : 0, parsed.problem_code, parsed.slides_link]
     );
 
     // Auto-assign 2-3 juries randomly if none assigned yet
-    const existingAssign = await db.get(`SELECT 1 as x FROM jury_assignments WHERE team_id = ? LIMIT 1`, [parsed.team_id]);
+    const existingAssign = await db.execute(`SELECT 1 as x FROM jury_assignments WHERE team_id = ? LIMIT 1`, [parsed.team_id]);
     if (!existingAssign) {
-      const juryList = await db.all(`SELECT jury_id FROM juries ORDER BY RANDOM() LIMIT 3`);
+      const juryList = await db.execute(`SELECT jury_id FROM juries ORDER BY RANDOM() LIMIT 3`);
       const pickCount = Math.max(2, Math.min(3, juryList.length));
       const picked = juryList.slice(0, pickCount).map(j => j.jury_id);
       
-      const stmt = await db.prepare(`INSERT INTO jury_assignments (team_id, jury_id) VALUES (?, ?) ON CONFLICT(team_id, jury_id) DO NOTHING`);
+      const stmt = await db.execute(`INSERT INTO jury_assignments (team_id, jury_id) VALUES (?, ?) ON CONFLICT(team_id, jury_id) DO NOTHING`);
       try {
-        await db.exec('BEGIN');
+        await db.execute('BEGIN');
         for (const jid of picked) {
           await stmt.run([parsed.team_id, jid]);
         }
-        await db.exec('COMMIT');
+        await db.execute('COMMIT');
       } catch (e) {
-        await db.exec('ROLLBACK');
+        await db.execute('ROLLBACK');
       } finally {
         await stmt.finalize();
       }
@@ -349,7 +323,7 @@ app.post('/api/submit', async (req, res) => {
 app.get('/api/submissions/:team_id', async (req, res) => {
   try {
     const { team_id } = req.params;
-    const submissions = await db.all(
+    const submissions = await db.execute(
       `SELECT * FROM submissions WHERE team_id = ? ORDER BY created_at DESC`, 
       [team_id]
     );
@@ -369,7 +343,7 @@ app.get('/api/submissions', async (req, res) => {
     const sortOrder = String(order).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
     const like = `%${String(search)}%`;
     
-    const rows = await db.all(
+    const rows = await db.execute(
       `SELECT s.id, s.team_id, t.team_name, t.leader_name, t.leader_id, t.phone, 
               s.problem_id, s.problem_code, s.slides_link, s.presented, s.created_at
        FROM submissions s
@@ -389,7 +363,7 @@ app.get('/api/submissions', async (req, res) => {
 app.patch('/api/submissions/:id/presented', async (req, res) => {
   try {
     const { id } = req.params;
-    await db.run(`UPDATE submissions SET presented = 1 WHERE id = ?`, [id]);
+    await db.execute(`UPDATE submissions SET presented = 1 WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating presentation status:', error);
@@ -401,7 +375,7 @@ app.patch('/api/submissions/:id/presented', async (req, res) => {
 app.delete('/api/submissions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await db.run(`DELETE FROM submissions WHERE id = ?`, [id]);
+    await db.execute(`DELETE FROM submissions WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting submission:', error);
@@ -415,10 +389,10 @@ app.post('/api/evaluations', async (req, res) => {
     const e = evaluationSchema.parse(req.body);
     
     // Verify jury exists and is assigned to team
-    const juryExists = await db.get(`SELECT 1 FROM juries WHERE jury_id = ?`, [e.jury_id]);
+    const juryExists = await db.execute(`SELECT 1 FROM juries WHERE jury_id = ?`, [e.jury_id]);
     if (!juryExists) return res.status(403).json({ error: 'Unknown jury' });
     
-    const assigned = await db.get(
+    const assigned = await db.execute(
       `SELECT 1 FROM jury_assignments WHERE team_id = ? AND jury_id = ?`, 
       [e.team_id, e.jury_id]
     );
@@ -426,7 +400,7 @@ app.post('/api/evaluations', async (req, res) => {
     
     const total = (e.ppt_design + e.idea + e.pitching + e.project_impact) / 4;
     
-    await db.run(
+    await db.execute(
       `INSERT INTO evaluations (team_id, jury_id, ppt_design, idea, pitching, project_impact, remarks, total_score, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(team_id, jury_id) DO UPDATE SET
@@ -441,15 +415,15 @@ app.post('/api/evaluations', async (req, res) => {
     );
 
     // Auto-mark as presented if all assigned juries have evaluated
-    const expectedRow = await db.get(`SELECT COUNT(*) as c FROM jury_assignments WHERE team_id = ?`, [e.team_id]);
-    const doneRow = await db.get(
+    const expectedRow = await db.execute(`SELECT COUNT(*) as c FROM jury_assignments WHERE team_id = ?`, [e.team_id]);
+    const doneRow = await db.execute(
       `SELECT COUNT(*) as c FROM evaluations WHERE team_id = ? AND jury_id IN 
        (SELECT jury_id FROM jury_assignments WHERE team_id = ?)`, 
       [e.team_id, e.team_id]
     );
     
     if (expectedRow && doneRow && expectedRow.c > 0 && doneRow.c >= expectedRow.c) {
-      await db.run(`UPDATE submissions SET presented = 1 WHERE team_id = ?`, [e.team_id]);
+      await db.execute(`UPDATE submissions SET presented = 1 WHERE team_id = ?`, [e.team_id]);
     }
     
     res.json({ success: true });
@@ -475,7 +449,7 @@ app.post('/api/admin/scores', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     
-    const rows = await db.all(
+    const rows = await db.execute(
       `SELECT s.team_id, t.team_name, s.problem_id, s.problem_code,
               AVG(e.total_score) as avg_score,
               COUNT(e.id) as evaluations_count
@@ -486,7 +460,7 @@ app.post('/api/admin/scores', async (req, res) => {
        ORDER BY avg_score DESC NULLS LAST`
     );
     
-    const perJury = await db.all(`SELECT team_id, jury_id, total_score FROM evaluations`);
+    const perJury = await db.execute(`SELECT team_id, jury_id, total_score FROM evaluations`);
     res.json({ summary: rows, perJury });
   } catch (error) {
     console.error('Error fetching admin scores:', error);
@@ -497,7 +471,7 @@ app.post('/api/admin/scores', async (req, res) => {
 // Jury management
 app.get('/api/admin/juries', async (req, res) => {
   try {
-    const juries = await db.all(
+    const juries = await db.execute(
       `SELECT jury_id, name, email, department FROM juries ORDER BY department, name`
     );
     res.json(juries);
@@ -513,7 +487,7 @@ app.post('/api/admin/juries', async (req, res) => {
     
     if (j.password) {
       const pwd = hashPassword(j.password);
-      await db.run(
+      await db.execute(
         `INSERT INTO juries (jury_id, name, email, department, password_hash) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(jury_id) DO UPDATE SET 
            name=excluded.name, 
@@ -523,7 +497,7 @@ app.post('/api/admin/juries', async (req, res) => {
         [j.jury_id, j.name, j.email, j.department, pwd]
       );
     } else {
-      await db.run(
+      await db.execute(
         `INSERT INTO juries (jury_id, name, email, department) VALUES (?, ?, ?, ?)
          ON CONFLICT(jury_id) DO UPDATE SET 
            name=excluded.name, 
@@ -545,7 +519,7 @@ app.post('/api/admin/juries', async (req, res) => {
 app.delete('/api/admin/juries/:jury_id', async (req, res) => {
   try {
     const { jury_id } = req.params;
-    await db.run(`DELETE FROM juries WHERE jury_id = ?`, [jury_id]);
+    await db.execute(`DELETE FROM juries WHERE jury_id = ?`, [jury_id]);
     res.json({ success: true });
   } catch (e) {
     console.error('Error deleting jury:', e);
@@ -561,7 +535,7 @@ app.post('/api/jury/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
     
-    const jury = await db.get(
+    const jury = await db.execute(
       `SELECT jury_id, name, email, department, password_hash FROM juries WHERE email = ?`, 
       [email]
     );
@@ -585,7 +559,7 @@ app.post('/api/jury/login', async (req, res) => {
 app.get('/api/admin/assignments/:jury_id', async (req, res) => {
   try {
     const { jury_id } = req.params;
-    const list = await db.all(
+    const list = await db.execute(
       `SELECT team_id FROM jury_assignments WHERE jury_id = ? ORDER BY team_id`, 
       [jury_id]
     );
@@ -607,23 +581,23 @@ app.post('/api/admin/assignments/:jury_id', async (req, res) => {
     
     // Filter only existing team_ids
     const placeholders = team_ids.map(() => '?').join(',');
-    const rows = await db.all(
+    const rows = await db.execute(
       `SELECT team_id FROM teams WHERE team_id IN (${placeholders})`, 
       team_ids.map(t => String(t))
     );
     const validIds = rows.map(r => r.team_id);
     
-    await db.exec('BEGIN');
-    await db.run(`DELETE FROM jury_assignments WHERE jury_id = ?`, [jury_id]);
+    await db.execute('BEGIN');
+    await db.execute(`DELETE FROM jury_assignments WHERE jury_id = ?`, [jury_id]);
     
-    const stmt = await db.prepare(`INSERT INTO jury_assignments (team_id, jury_id) VALUES (?, ?)`);
+    const stmt = await db.execute(`INSERT INTO jury_assignments (team_id, jury_id) VALUES (?, ?)`);
     try {
       for (const tid of validIds) {
         await stmt.run([String(tid), jury_id]);
       }
-      await db.exec('COMMIT');
+      await db.execute('COMMIT');
     } catch (e) {
-      await db.exec('ROLLBACK');
+      await db.execute('ROLLBACK');
       throw e;
     } finally {
       await stmt.finalize();
@@ -655,7 +629,7 @@ app.post('/api/admin/jury-mapping', async (req, res) => {
     let successful = 0;
     let errors = [];
 
-    await db.exec('BEGIN');
+    await db.execute('BEGIN');
     
     try {
       for (let i = 0; i < dataLines.length; i++) {
@@ -671,21 +645,21 @@ app.post('/api/admin/jury-mapping', async (req, res) => {
         const [team_id, jury_id] = parts;
         
         // Check if team exists
-        const teamExists = await db.get(`SELECT 1 FROM teams WHERE team_id = ?`, [team_id]);
+        const teamExists = await db.execute(`SELECT 1 FROM teams WHERE team_id = ?`, [team_id]);
         if (!teamExists) {
           errors.push(`Line ${i + 2}: Team ${team_id} not found`);
           continue;
         }
 
         // Check if jury exists
-        const juryExists = await db.get(`SELECT 1 FROM juries WHERE jury_id = ?`, [jury_id]);
+        const juryExists = await db.execute(`SELECT 1 FROM juries WHERE jury_id = ?`, [jury_id]);
         if (!juryExists) {
           errors.push(`Line ${i + 2}: Jury ${jury_id} not found`);
           continue;
         }
 
         // Insert assignment (ignore duplicates)
-        await db.run(
+        await db.execute(
           `INSERT INTO jury_assignments (team_id, jury_id) VALUES (?, ?) 
            ON CONFLICT(team_id, jury_id) DO NOTHING`,
           [team_id, jury_id]
@@ -693,7 +667,7 @@ app.post('/api/admin/jury-mapping', async (req, res) => {
         successful++;
       }
 
-      await db.exec('COMMIT');
+      await db.execute('COMMIT');
       res.json({ 
         success: true, 
         message: `Successfully imported ${successful} assignments`,
@@ -701,7 +675,7 @@ app.post('/api/admin/jury-mapping', async (req, res) => {
         errors: errors.length > 0 ? errors : undefined
       });
     } catch (e) {
-      await db.exec('ROLLBACK');
+      await db.execute('ROLLBACK');
       throw e;
     }
   } catch (e) {
@@ -715,10 +689,10 @@ app.get('/api/jury/:jury_id/assigned-teams', async (req, res) => {
   try {
     const { jury_id } = req.params;
     
-    const exists = await db.get(`SELECT 1 FROM juries WHERE jury_id = ?`, [jury_id]);
+    const exists = await db.execute(`SELECT 1 FROM juries WHERE jury_id = ?`, [jury_id]);
     if (!exists) return res.status(404).json({ error: 'Jury not found' });
     
-    const rows = await db.all(
+    const rows = await db.execute(
       `SELECT DISTINCT s.team_id, t.team_name, t.leader_name, t.leader_id, s.slides_link,
               COALESCE((SELECT 1 FROM evaluations e WHERE e.team_id = s.team_id AND e.jury_id = ?), 0) as evaluated,
               s.problem_id, s.problem_code,
